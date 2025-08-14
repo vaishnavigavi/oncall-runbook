@@ -1,10 +1,11 @@
 import os
 import logging
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
-from typing import Optional
+from typing import Optional, Dict, Any
+import uuid
 
 from app.services.ingestion_service import IngestionService
 from app.services.rag_service import RAGService
@@ -77,6 +78,159 @@ async def health_check():
         "service": "oncall-runbook-api",
         "version": "1.0.0"
     }
+
+@app.get("/selfcheck")
+async def selfcheck() -> Dict[str, Any]:
+    """Run comprehensive system self-check and return status summary"""
+    try:
+        check_results = {
+            "status": "running",
+            "checks": {},
+            "summary": {},
+            "timestamp": str(uuid.uuid4())
+        }
+        
+        # Check 1: KB Status
+        try:
+            kb_status = ingestion_service.get_kb_status()
+            check_results["checks"]["kb_status"] = {
+                "status": "ok",
+                "docs_count": kb_status.get("docs_count", 0),
+                "index_ready": kb_status.get("index_ready", False),
+                "details": kb_status
+            }
+        except Exception as e:
+            check_results["checks"]["kb_status"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # Check 2: FAISS Index Health
+        try:
+            faiss_service = FAISSService()
+            index_status = faiss_service.get_index_status()
+            check_results["checks"]["faiss_index"] = {
+                "status": "ok",
+                "index_exists": index_status.get("index_exists", False),
+                "total_vectors": index_status.get("total_vectors", 0),
+                "details": index_status
+            }
+        except Exception as e:
+            check_results["checks"]["faiss_index"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # Check 3: Database Health
+        try:
+            db_service = DatabaseService()
+            sessions = db_service.list_sessions()
+            check_results["checks"]["database"] = {
+                "status": "ok",
+                "sessions_count": len(sessions),
+                "details": {"sessions": [s.title for s in sessions[:5]]}  # First 5 session titles
+            }
+        except Exception as e:
+            check_results["checks"]["database"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # Check 4: Minimal Ingest if Empty
+        try:
+            if kb_status.get("docs_count", 0) == 0:
+                # Create a minimal test document
+                test_doc = """# Test Document
+## First Checks
+• Check system status
+• Verify connectivity
+• Monitor resources
+
+## Fix
+• Restart services if needed
+• Scale resources appropriately
+
+## Validate
+• Verify system recovery
+• Monitor performance metrics"""
+                
+                test_result = ingestion_service.ingest_single_document("test_doc.md", test_doc)
+                check_results["checks"]["minimal_ingest"] = {
+                    "status": "performed",
+                    "chunks_created": test_result.get("chunks_created", 0),
+                    "sections_detected": test_result.get("sections_detected", 0)
+                }
+            else:
+                check_results["checks"]["minimal_ingest"] = {
+                    "status": "skipped",
+                    "reason": "KB already has documents"
+                }
+        except Exception as e:
+            check_results["checks"]["minimal_ingest"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # Check 5: Sample RAG Queries
+        try:
+            rag_service = RAGService()
+            sample_questions = [
+                "What are the first steps for system issues?",
+                "How do I check CPU usage?",
+                "What should I do about high memory usage?"
+            ]
+            
+            rag_results = []
+            for question in sample_questions:
+                try:
+                    response = rag_service.ask_question(question)
+                    rag_results.append({
+                        "question": question,
+                        "status": "ok",
+                        "quality_gate_passed": response.get("quality_gate", {}).get("passed", False),
+                        "chunks_retrieved": response.get("retrieved_chunks", 0)
+                    })
+                except Exception as e:
+                    rag_results.append({
+                        "question": question,
+                        "status": "error",
+                        "error": str(e)
+                    })
+            
+            check_results["checks"]["sample_rag"] = {
+                "status": "ok",
+                "questions_tested": len(sample_questions),
+                "results": rag_results
+            }
+        except Exception as e:
+            check_results["checks"]["sample_rag"] = {
+                "status": "error",
+                "error": str(e)
+            }
+        
+        # Generate summary
+        total_checks = len(check_results["checks"])
+        passed_checks = sum(1 for check in check_results["checks"].values() if check.get("status") == "ok")
+        error_checks = sum(1 for check in check_results["checks"].values() if check.get("status") == "error")
+        
+        check_results["summary"] = {
+            "total_checks": total_checks,
+            "passed": passed_checks,
+            "errors": error_checks,
+            "overall_status": "ok" if error_checks == 0 else "error"
+        }
+        
+        # Set final status
+        check_results["status"] = "completed"
+        
+        return check_results
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Self-check failed: {str(e)}",
+            "timestamp": str(uuid.uuid4())
+        }
 
 # Session Management Endpoints
 
