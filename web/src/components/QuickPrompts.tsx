@@ -62,4 +62,3 @@ const QuickPrompts: React.FC<QuickPromptsProps> = ({ onPromptSelect }) => {
 }
 
 export default QuickPrompts
-

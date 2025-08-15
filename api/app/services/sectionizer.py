@@ -518,4 +518,3 @@ class Sectionizer:
         except Exception as e:
             logger.error(f"Error exporting sections markdown: {e}")
             return f"Error exporting sections: {str(e)}"
-

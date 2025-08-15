@@ -429,4 +429,3 @@ CPU spikes can occur due to increased load, inefficient code, or resource conten
             assert "50%" in answer or "concurrency" in answer
             assert "DLQ" in answer
             assert "100" in answer or "depth" in answer
-

@@ -128,4 +128,3 @@ const KeyboardShortcuts: React.FC<KeyboardShortcutsProps> = ({
 }
 
 export default KeyboardShortcuts
-

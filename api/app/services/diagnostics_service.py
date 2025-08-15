@@ -174,4 +174,3 @@ class DiagnosticsService:
                 results["summary"].append(f"❌ {queue} queue: {queue_result['error']}")
         
         return results
-

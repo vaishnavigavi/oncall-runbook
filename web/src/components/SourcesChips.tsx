@@ -32,4 +32,3 @@ const SourcesChips: React.FC<SourcesChipsProps> = ({ citations, onSourceClick })
 }
 
 export default SourcesChips
-

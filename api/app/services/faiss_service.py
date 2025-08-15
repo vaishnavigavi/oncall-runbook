@@ -1,79 +1,74 @@
-import logging
 import os
+import logging
 import pickle
+from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
-from pathlib import Path
-import json
-from datetime import datetime
 
-# Use scikit-learn instead of FAISS for Railway compatibility
 try:
-    from sklearn.metrics.pairwise import cosine_similarity
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    SKLEARN_AVAILABLE = True
+    import faiss
+    FAISS_AVAILABLE = True
 except ImportError:
-    SKLEARN_AVAILABLE = False
+    FAISS_AVAILABLE = False
+    logging.warning("FAISS not available, using mock implementation")
 
 logger = logging.getLogger(__name__)
 
 class FAISSService:
-    """Service for managing vector search using scikit-learn (FAISS alternative)"""
+    """Service for managing FAISS vector index"""
     
     def __init__(self):
         self.index_dir = "/app/data/index"
-        self.index_file = f"{self.index_dir}/sklearn_index.pkl"
-        self.metadata_file = f"{self.index_dir}/metadata.pkl"
-        self.vectorizer = None
-        self.vectors = None
+        self.index_file = os.path.join(self.index_dir, "faiss_index.bin")
+        self.metadata_file = os.path.join(self.index_dir, "metadata.pkl")
+        
+        self.index = None
         self.metadata = []
-        self._ensure_index_dir()
-    
-    def _ensure_index_dir(self):
-        """Ensure index directory exists"""
-        Path(self.index_dir).mkdir(parents=True, exist_ok=True)
+        self.dimension = int(os.getenv("FAISS_DIMENSION", "1536"))
+        
+        # Ensure index directory exists
+        os.makedirs(self.index_dir, exist_ok=True)
+        
+        # Load existing index if available
+        self._load_index()
     
     def _load_index(self):
-        """Load existing index if available"""
+        """Load existing FAISS index and metadata"""
         try:
             if os.path.exists(self.index_file) and os.path.exists(self.metadata_file):
-                with open(self.index_file, 'rb') as f:
-                    self.vectors = pickle.load(f)
+                # Load FAISS index
+                if FAISS_AVAILABLE:
+                    self.index = faiss.read_index(self.index_file)
+                    logger.info(f"Loaded existing FAISS index with {self.index.ntotal} vectors")
+                else:
+                    logger.warning("FAISS not available, using mock index")
+                    self.index = None
+                
+                # Load metadata
                 with open(self.metadata_file, 'rb') as f:
                     self.metadata = pickle.load(f)
-                
-                # Initialize vectorizer
-                self.vectorizer = TfidfVectorizer(
-                    max_features=1000,
-                    stop_words='english',
-                    ngram_range=(1, 2)
-                )
-                
-                # Fit vectorizer on existing data
-                if self.metadata:
-                    texts = [item.get('text', '') for item in self.metadata]
-                    self.vectorizer.fit(texts)
-                
-                logger.info(f"Loaded existing index with {len(self.metadata)} vectors")
-                return True
+                logger.info(f"Loaded metadata for {len(self.metadata)} chunks")
+            else:
+                logger.info("No existing index found, will create new one")
         except Exception as e:
-            logger.error(f"Error loading index: {e}")
-        
-        return False
+            logger.error(f"Error loading existing index: {e}")
+            self.index = None
+            self.metadata = []
     
     def _save_index(self):
-        """Save index to disk"""
+        """Save FAISS index and metadata to disk"""
         try:
-            if self.vectors is not None:
-                with open(self.index_file, 'wb') as f:
-                    pickle.dump(self.vectors, f)
-                with open(self.metadata_file, 'wb') as f:
-                    pickle.dump(self.metadata, f)
-                logger.info("Index saved successfully")
-                return True
+            if self.index is not None and FAISS_AVAILABLE:
+                faiss.write_index(self.index, self.index_file)
+                logger.info("FAISS index saved to disk")
+            
+            with open(self.metadata_file, 'wb') as f:
+                pickle.dump(self.metadata, f)
+            logger.info("Metadata saved to disk")
+            
+            return True
         except Exception as e:
             logger.error(f"Error saving index: {e}")
-        return False
+            return False
     
     def save_index(self):
         """Public method to save the index"""
@@ -82,16 +77,17 @@ class FAISSService:
     def ensure_index(self):
         """Ensure index exists and is ready (do not wipe existing index)"""
         try:
-            if not self._load_index():
-                # Initialize new index
-                self.vectorizer = TfidfVectorizer(
-                    max_features=1000,
-                    stop_words='english',
-                    ngram_range=(1, 2)
-                )
-                self.vectors = None
-                self.metadata = []
-                logger.info("Initialized new index")
+            if self.index is not None:
+                logger.info("Index already exists and is ready")
+                return True
+            
+            if FAISS_AVAILABLE:
+                # Create new index
+                self.index = faiss.IndexFlatIP(self.dimension)
+                logger.info(f"Created new FAISS index with dimension {self.dimension}")
+            else:
+                logger.warning("FAISS not available, using mock index")
+                self.index = None
             
             return True
         except Exception as e:
@@ -99,117 +95,185 @@ class FAISSService:
             return False
     
     def is_index_populated(self) -> bool:
-        """Check if index has vectors"""
-        return self.vectors is not None and len(self.metadata) > 0
+        """Check if the index has content (vectors and metadata)"""
+        try:
+            if self.index is None:
+                return False
+            
+            if FAISS_AVAILABLE:
+                return self.index.ntotal > 0 and len(self.metadata) > 0
+            else:
+                return len(self.metadata) > 0
+        except Exception as e:
+            logger.error(f"Error checking if index is populated: {e}")
+            return False
     
     def get_index_status(self) -> Dict[str, Any]:
-        """Get index status information"""
+        """Get detailed status of the FAISS index"""
         try:
-            index_exists = os.path.exists(self.index_file) and os.path.exists(self.metadata_file)
-            total_vectors = len(self.metadata) if self.metadata else 0
+            if self.index is None:
+                return {
+                    "index_exists": False,
+                    "index_type": "none",
+                    "total_vectors": 0,
+                    "dimension": self.dimension,
+                    "metadata_count": len(self.metadata)
+                }
             
-            return {
-                "index_exists": index_exists,
-                "total_vectors": total_vectors,
-                "index_size_mb": os.path.getsize(self.index_file) / (1024 * 1024) if index_exists else 0,
-                "last_updated": datetime.now().isoformat() if self.metadata else None,
-                "vectorizer_ready": self.vectorizer is not None
-            }
+            if FAISS_AVAILABLE:
+                return {
+                    "index_exists": True,
+                    "index_type": "faiss",
+                    "total_vectors": self.index.ntotal,
+                    "dimension": self.index.d,
+                    "metadata_count": len(self.metadata),
+                    "is_trained": self.index.is_trained
+                }
+            else:
+                return {
+                    "index_exists": True,
+                    "index_type": "mock",
+                    "total_vectors": len(self.metadata),
+                    "dimension": self.dimension,
+                    "metadata_count": len(self.metadata)
+                }
         except Exception as e:
             logger.error(f"Error getting index status: {e}")
             return {
                 "index_exists": False,
-                "total_vectors": 0,
+                "index_type": "error",
                 "error": str(e)
             }
     
-    def upsert_chunks(self, chunks: List[Dict[str, Any]]) -> bool:
-        """Add or update chunks in the index"""
+    def upsert_chunks(self, chunks: List[Any]):
+        """Upsert chunks to the index (add or update)"""
         try:
             if not chunks:
-                return True
+                logger.warning("No chunks provided for upsert")
+                return False
             
-            # Extract texts for vectorization
-            texts = [chunk.get('text', '') for chunk in chunks]
+            # Ensure index exists
+            self.ensure_index()
             
-            # Fit vectorizer on new texts
-            if self.vectorizer is None:
-                self.vectorizer = TfidfVectorizer(
-                    max_features=1000,
-                    stop_words='english',
-                    ngram_range=(1, 2)
-                )
+            # Extract embeddings and metadata
+            embeddings = []
+            new_metadata = []
             
-            # Transform texts to vectors
-            new_vectors = self.vectorizer.fit_transform(texts).toarray()
+            for chunk in chunks:
+                if hasattr(chunk, 'embedding') and chunk.embedding is not None:
+                    embeddings.append(chunk.embedding)
+                    
+                    # Create metadata entry
+                    metadata_entry = {
+                        'id': chunk.id,
+                        'content': chunk.content,
+                        'chunk_index': getattr(chunk, 'chunk_index', 0),
+                        'heading': getattr(chunk, 'heading', ''),
+                        'metadata': getattr(chunk, 'metadata', {})
+                    }
+                    new_metadata.append(metadata_entry)
+                else:
+                    logger.warning(f"Chunk {chunk.id} has no embedding, skipping")
             
-            # Add new metadata
-            for i, chunk in enumerate(chunks):
-                chunk['vector_id'] = len(self.metadata) + i
-                self.metadata.append(chunk)
+            if not embeddings:
+                logger.error("No valid embeddings found in chunks")
+                return False
             
-            # Update vectors
-            if self.vectors is None:
-                self.vectors = new_vectors
+            # Convert to numpy array
+            embeddings_array = np.array(embeddings, dtype=np.float32)
+            
+            if FAISS_AVAILABLE and self.index is not None:
+                # Add vectors to FAISS index
+                self.index.add(embeddings_array)
+                logger.info(f"Added {len(embeddings)} vectors to FAISS index")
             else:
-                self.vectors = np.vstack([self.vectors, new_vectors])
+                logger.info(f"Mock mode: would add {len(embeddings)} vectors")
             
-            # Save index
+            # Add metadata
+            self.metadata.extend(new_metadata)
+            logger.info(f"Added metadata for {len(new_metadata)} chunks")
+            
+            # Save to disk
             self._save_index()
             
-            logger.info(f"Upserted {len(chunks)} chunks, total vectors: {len(self.metadata)}")
             return True
             
         except Exception as e:
             logger.error(f"Error upserting chunks: {e}")
             return False
     
-    def search(self, query: str, top_k: int = 8) -> List[Dict[str, Any]]:
+    def search(self, query_embedding: List[float], k: int = 5) -> List[Tuple[Any, float]]:
         """Search for similar chunks"""
         try:
             if not self.is_index_populated():
-                logger.warning("Index not populated, returning empty results")
+                logger.warning("Index is not populated, cannot perform search")
                 return []
             
-            # Transform query to vector
-            query_vector = self.vectorizer.transform([query]).toarray()
-            
-            # Calculate similarities
-            similarities = cosine_similarity(query_vector, self.vectors).flatten()
-            
-            # Get top-k results
-            top_indices = np.argsort(similarities)[::-1][:top_k]
-            
-            results = []
-            for idx in top_indices:
-                if similarities[idx] > 0.1:  # Minimum similarity threshold
-                    result = self.metadata[idx].copy()
-                    result['similarity'] = float(similarities[idx])
-                    results.append(result)
-            
-            logger.info(f"Search returned {len(results)} results for query: {query[:50]}...")
-            return results
-            
+            if FAISS_AVAILABLE and self.index is not None:
+                # Convert query to numpy array
+                query_array = np.array([query_embedding], dtype=np.float32)
+                
+                # Search FAISS index
+                scores, indices = self.index.search(query_array, min(k, self.index.ntotal))
+                
+                # Return results with metadata
+                results = []
+                for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
+                    if idx < len(self.metadata):
+                        chunk = self._create_chunk_from_metadata(self.metadata[idx])
+                        results.append((chunk, float(score)))
+                
+                return results
+            else:
+                # Mock search - return random results
+                logger.info("Mock mode: returning random search results")
+                import random
+                random.shuffle(self.metadata)
+                
+                results = []
+                for i, metadata in enumerate(self.metadata[:k]):
+                    chunk = self._create_chunk_from_metadata(metadata)
+                    # Generate mock similarity score
+                    score = random.uniform(0.1, 0.9)
+                    results.append((chunk, score))
+                
+                return results
+                
         except Exception as e:
-            logger.error(f"Error searching index: {e}")
+            logger.error(f"Error during search: {e}")
             return []
     
-    def clear_index(self):
-        """Clear the entire index"""
+    def _create_chunk_from_metadata(self, metadata: Dict[str, Any]) -> Any:
+        """Create a chunk object from metadata"""
+        # Create a simple chunk object with the required attributes
+        class SimpleChunk:
+            def __init__(self, metadata):
+                self.id = metadata.get('id', '')
+                self.content = metadata.get('content', '')
+                self.chunk_index = metadata.get('chunk_index', 0)
+                self.heading = metadata.get('heading', '')
+                self.metadata = metadata.get('metadata', {})
+        
+        return SimpleChunk(metadata)
+    
+    def get_index_stats(self) -> Dict[str, Any]:
+        """Get statistics about the current index"""
         try:
-            self.vectors = None
-            self.metadata = []
-            self.vectorizer = None
+            status = self.get_index_status()
             
-            # Remove index files
-            if os.path.exists(self.index_file):
-                os.remove(self.index_file)
-            if os.path.exists(self.metadata_file):
-                os.remove(self.metadata_file)
+            # Count files by type
+            file_types = {}
+            for meta in self.metadata:
+                filename = meta.get('metadata', {}).get('filename', 'unknown')
+                ext = os.path.splitext(filename)[1].lower()
+                file_types[ext] = file_types.get(ext, 0) + 1
             
-            logger.info("Index cleared successfully")
-            return True
-            
+            return {
+                "index_status": status,
+                "file_types": file_types,
+                "total_files": len(set(meta.get('metadata', {}).get('filename', '') for meta in self.metadata)),
+                "total_chunks": len(self.metadata)
+            }
         except Exception as e:
-            logger.error(f"Error clearing index: {e}")
-            return False
+            logger.error(f"Error getting index stats: {e}")
+            return {"error": str(e)}

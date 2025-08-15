@@ -64,4 +64,3 @@ class MessageListResponse(BaseModel):
 class ExportResponse(BaseModel):
     markdown: str = Field(..., description="Markdown export of session")
     filename: str = Field(..., description="Suggested filename for export")
-

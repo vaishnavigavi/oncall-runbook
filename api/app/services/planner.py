@@ -653,4 +653,3 @@ class Planner:
         except Exception as e:
             logger.error(f"Error getting planning stats: {e}")
             return {"error": str(e)}
-

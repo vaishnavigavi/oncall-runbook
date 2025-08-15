@@ -41,4 +41,3 @@ def mock_environment(monkeypatch):
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2023-05-15")
     monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT_NAME", "test-deployment")
-

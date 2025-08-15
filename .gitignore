@@ -118,4 +118,4 @@ data/index/*
 data/mock/logs/*
 !data/index/.gitkeep
 !data/mock/logs/.gitkeep
-
+.vercel

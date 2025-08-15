@@ -683,4 +683,3 @@ class RetrievalPipeline:
         except Exception as e:
             logger.error(f"Error getting retrieval stats: {e}")
             return {"error": str(e)}
-

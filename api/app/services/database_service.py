@@ -45,20 +45,15 @@ class DatabaseService:
             return sqlite3.connect(DATABASE_PATH)
     
     def _ensure_tables(self):
-        """Ensure all required tables exist"""
+        """Create tables if they don't exist"""
         try:
-            if self.db_type == "sqlite":
-                self._create_sqlite_tables()
-            elif self.db_type == "postgresql":
+            if self.db_type == 'postgresql':
                 self._create_postgresql_tables()
             else:
-                raise ValueError(f"Unsupported database type: {self.db_type}")
+                self._create_sqlite_tables()
             logger.info(f"Database tables ensured using {self.db_type}")
-            return True
         except Exception as e:
             logger.error(f"Error ensuring tables: {e}")
-            # Don't raise the error, just log it and return False
-            return False
     
     def _create_sqlite_tables(self):
         """Create SQLite tables"""

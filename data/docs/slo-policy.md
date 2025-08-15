@@ -170,4 +170,3 @@ Error Rate = Failed Requests / Total Requests
 - Service reliability perception
 - Operational efficiency gains
 - Cost reduction from fewer incidents
-

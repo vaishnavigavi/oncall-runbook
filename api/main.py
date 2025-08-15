@@ -46,16 +46,7 @@ app.add_middleware(
 ingestion_service = IngestionService()
 rag_service = RAGService()
 faiss_service = FAISSService()
-
-# Initialize database service
-try:
-    database_service = DatabaseService()
-    database_service._ensure_tables()
-    logger.info("Database tables ensured successfully")
-except Exception as e:
-    logger.warning(f"Database initialization failed: {e}")
-    logger.warning("Continuing without database functionality - sessions and chat history will not be available")
-    database_service = None
+database_service = DatabaseService()
 
 @app.on_event("startup")
 async def startup_event():
@@ -71,8 +62,8 @@ async def startup_event():
         if not faiss_service.is_index_populated():
             logger.info("Index is empty, running initial seed document ingestion...")
             result = ingestion_service.ingest_seed_documents()
-            if result.get("status") == "success":
-                logger.info(f"Initial ingestion completed: {result.get('documents_processed', 0)} files, {result.get('chunks_created', 0)} chunks")
+            if result["success"]:
+                logger.info(f"Initial ingestion completed: {result['ingested_files']} files, {result['total_chunks']} chunks")
             else:
                 logger.warning(f"Initial ingestion had issues: {result.get('message', 'Unknown error')}")
         else:

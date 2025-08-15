@@ -178,4 +178,3 @@ Tests cover:
 - **Memory Usage**: < 100MB per test
 - **Disk Usage**: Temporary files cleaned automatically
 - **Network**: No external calls (fully mocked)
-
