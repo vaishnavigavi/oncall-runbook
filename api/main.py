@@ -50,7 +50,7 @@ faiss_service = FAISSService()
 # Initialize database service
 try:
     database_service = DatabaseService()
-    database_service.ensure_tables()
+    database_service._ensure_tables()
     logger.info("Database tables ensured successfully")
 except Exception as e:
     logger.warning(f"Database initialization failed: {e}")
