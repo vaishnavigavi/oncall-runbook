@@ -25,10 +25,5 @@
   ],
   "env": {
     "PYTHONPATH": "api"
-  },
-  "functions": {
-    "api/vercel_main.py": {
-      "maxDuration": 30
-    }
   }
 }

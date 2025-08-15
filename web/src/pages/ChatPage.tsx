@@ -6,7 +6,7 @@ import SourceDetailsPanel from '../components/SourceDetailsPanel'
 import Sidebar from '../components/Sidebar'
 import QuickPrompts from '../components/QuickPrompts'
 import Toast from '../components/Toast'
-import { askQuestion, StructuredAskResponse } from '../services/api'
+import { api, StructuredAskResponse, Citation } from '../services/api'
 import { 
   getLastSessionId, 
   setLastSessionId, 
@@ -20,7 +20,7 @@ export interface Message {
   type: 'user' | 'assistant'
   content: string
   timestamp: Date
-  citations?: string[]
+  citations?: Citation[]
   confidence?: number
   diagnostics?: any
 }
@@ -87,7 +87,7 @@ const ChatPage: React.FC = () => {
         type: msg.role as 'user' | 'assistant',
         content: msg.content,
         timestamp: new Date(msg.created_at),
-        citations: msg.citations,
+        citations: msg.citations as Citation[],
         confidence: msg.confidence,
         diagnostics: msg.diagnostics
       }))
@@ -154,7 +154,7 @@ const ChatPage: React.FC = () => {
     setIsLoading(true)
 
     try {
-      const response: StructuredAskResponse = await askQuestion(content.trim())
+      const response: StructuredAskResponse = await api.askQuestion(content.trim())
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
