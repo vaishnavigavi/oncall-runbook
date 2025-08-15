@@ -32,19 +32,28 @@ class RAGService:
             trace_id = str(uuid.uuid4())
             logger.info(f"Processing question with trace_id: {trace_id}")
             
-            # Use diverse retrieval pipeline instead of simple FAISS search
-            search_results = self.retrieval_pipeline.retrieve_diverse_results(
-                question, self.faiss_service, top_k=8
-            )
-            
-            if not search_results:
+            # Search FAISS index for relevant chunks
+            try:
+                faiss_service = FAISSService()
+                faiss_service.ensure_index()
+                
+                # Use text-based search instead of embedding search
+                relevant_chunks = faiss_service.search(question, top_k=8)
+                
+                if not relevant_chunks:
+                    logger.warning("No relevant chunks found in FAISS index")
+                    # Fallback to keyword search
+                    relevant_chunks = self._keyword_fallback_search(question)
+                
+                logger.info(f"Retrieved {len(relevant_chunks)} relevant chunks")
+                
+            except Exception as e:
+                logger.error(f"Error searching FAISS index: {e}")
                 # Fallback to keyword search
-                search_results = self._keyword_search(question)
-                if not search_results:
-                    return self._create_error_response("No relevant information found", trace_id)
+                relevant_chunks = self._keyword_fallback_search(question)
             
             # Plan the response using the planner
-            planned_response = self.planner.plan_response(search_results, question)
+            planned_response = self.planner.plan_response(relevant_chunks, question)
             logger.info(f"Response planned: {planned_response.metadata}")
             
             # Run diagnostics if appropriate
@@ -73,7 +82,7 @@ class RAGService:
             # quality_report = {"quality_score": 1, "issues": [], "metrics": {}}
             
             # Get retrieval and planning statistics
-            retrieval_stats = self.retrieval_pipeline.get_retrieval_stats(search_results)
+            retrieval_stats = self.retrieval_pipeline.get_retrieval_stats(relevant_chunks)
             planning_stats = self.planner.get_planning_stats(planned_response)
             
             # Log quality check results
@@ -85,7 +94,7 @@ class RAGService:
                 "answer": final_answer,
                 "citations": final_citations if passes_gate else [],
                 "trace_id": trace_id,
-                "retrieved_chunks": len(search_results),
+                "retrieved_chunks": len(relevant_chunks),
                 "confidence": confidence if passes_gate else 0.0,
                 "diagnostics": diagnostics_results if passes_gate else None,
                 "quality_gate": {
@@ -120,6 +129,58 @@ class RAGService:
         }
     
     def _keyword_search(self, question: str) -> List[Tuple[Any, float]]:
+        """Fallback keyword search when embedding search fails"""
+        try:
+            # Extract key terms from the question
+            question_lower = question.lower()
+            
+            # Define keyword categories
+            cpu_keywords = ['cpu', 'processor', 'usage', 'high', 'spike', 'load']
+            memory_keywords = ['memory', 'ram', 'usage', 'high', 'leak', 'swap']
+            disk_keywords = ['disk', 'storage', 'space', 'usage', 'full', 'io']
+            alert_keywords = ['alert', 'alarm', 'warning', 'critical', 'incident']
+            command_keywords = ['command', 'script', 'tool', 'utility', 'check']
+            
+            # Check which category the question belongs to
+            if any(keyword in question_lower for keyword in cpu_keywords):
+                search_terms = ['cpu', 'processor', 'load', 'performance']
+            elif any(keyword in question_lower for keyword in memory_keywords):
+                search_terms = ['memory', 'ram', 'swap', 'leak']
+            elif any(keyword in question_lower for keyword in disk_keywords):
+                search_terms = ['disk', 'storage', 'space', 'io']
+            elif any(keyword in question_lower for keyword in alert_keywords):
+                search_terms = ['alert', 'alarm', 'incident', 'response']
+            elif any(keyword in question_lower for keyword in command_keywords):
+                search_terms = ['command', 'script', 'tool', 'check']
+            else:
+                search_terms = ['troubleshoot', 'investigate', 'check', 'verify']
+            
+            # Search for chunks containing these terms
+            all_chunks = self.faiss_service.metadata
+            relevant_chunks = []
+            
+            for chunk in all_chunks:
+                chunk_content = chunk.content.lower()
+                relevance_score = 0
+                
+                for term in search_terms:
+                    if term in chunk_content:
+                        relevance_score += 1
+                
+                if relevance_score > 0:
+                    # Normalize score
+                    normalized_score = min(relevance_score / len(search_terms), 0.8)
+                    relevant_chunks.append((chunk, normalized_score))
+            
+            # Sort by relevance and return top results
+            relevant_chunks.sort(key=lambda x: x[1], reverse=True)
+            return relevant_chunks[:6]
+            
+        except Exception as e:
+            logger.error(f"Error in keyword search: {e}")
+            return []
+    
+    def _keyword_fallback_search(self, question: str) -> List[Tuple[Any, float]]:
         """Fallback keyword search when embedding search fails"""
         try:
             # Extract key terms from the question
